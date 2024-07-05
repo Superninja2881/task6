@@ -1,0 +1,89 @@
+import os
+import multiprocessing
+import numpy as np
+import redis
+
+# Redis connection
+redis_client = redis.StrictRedis(host='localhost', port=6379, db=0)
+
+def is_valid_neighbor(x, y, rows, cols):
+    return 0 <= x < rows and 0 <= y < cols
+
+def get_neighbors(x, y, rows, cols):
+    neighbors = []
+    for i in range(-1, 2):
+        for j in range(-1, 2):
+            if i == 0 and j == 0:
+                continue
+            if is_valid_neighbor(x + i, y + j, rows, cols):
+                neighbors.append((x + i, y + j))
+    return neighbors
+
+def count_isolated_ones(matrix):
+    rows, cols = matrix.shape
+    isolated_ones = 0
+    for i in range(rows):
+        for j in range(cols):
+            if matrix[i, j] == 1 and all(matrix[x, y] == 0 for x, y in get_neighbors(i, j, rows, cols)):
+                isolated_ones += 1
+    return isolated_ones
+
+def count_isolated_clusters(matrix, cluster_size):
+    rows, cols = matrix.shape
+    clusters = 0
+    visited = np.zeros((rows, cols), dtype=bool)
+    for i in range(rows):
+        for j in range(cols):
+            if matrix[i, j] == 1 and not visited[i, j]:
+                cluster = [(i, j)]
+                visited[i, j] = True
+                size = 1
+                queue = [(i, j)]
+                while queue:
+                    x, y = queue.pop(0)
+                    neighbors = get_neighbors(x, y, rows, cols)
+                    for nx, ny in neighbors:
+                        if matrix[nx, ny] == 1 and not visited[nx, ny]:
+                            visited[nx, ny] = True
+                            cluster.append((nx, ny))
+                            queue.append((nx, ny))
+                            size += 1
+                if size == cluster_size:
+                    clusters += 1
+    return clusters
+
+def process_matrix(matrix):
+    matrix_key = str(matrix.tolist())
+    if redis_client.exists(matrix_key):
+        result = redis_client.get(matrix_key).decode()
+    else:
+        result = [str(count_isolated_ones(matrix)),
+                  str(count_isolated_clusters(matrix, 2)),
+                  str(count_isolated_clusters(matrix, 3))]
+        redis_client.set(matrix_key, ' '.join(result))
+    return ' '.join(result)
+
+def process_file(filename):
+    with open(filename, "r") as file:
+        results = []
+        for line in file:
+            split = line.rstrip().split("x")
+            row = split[0]
+            column = split[1].split(":")[0]
+            matrix_str = list(split[1].split(":")[1])
+            matrix = np.reshape(list(map(int, matrix_str)), (int(row), int(column)))
+            results.append(process_matrix(matrix))
+
+    output_filename = filename.replace(".in", ".out")
+    with open(output_filename, "w") as file:
+        file.write('\n'.join(results))
+
+def main():
+    input_dir = "C:/Users/CAROL/PycharmProjects/pythontask/input_data"
+    files = [os.path.join(input_dir, f) for f in os.listdir(input_dir) if f.endswith(".in")]
+
+    with multiprocessing.Pool() as pool:
+        pool.map(process_file, files)
+
+if __name__ == '__main__':
+    main()
